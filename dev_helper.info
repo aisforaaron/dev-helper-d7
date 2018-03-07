@@ -1,0 +1,6 @@
+name = Dev Helper
+description = "Drupal helper methods for local dev."
+project = dev_helper
+package = Development
+core = 7.x
+configure = admin/config/development/dev-helper

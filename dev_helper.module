@@ -1,0 +1,265 @@
+<?php
+
+// define custom admin path to view paragraph info
+
+/**
+ * Implements hook_menu().
+ *
+ * {@inheritdoc}
+ */
+function dev_helper_menu() {
+  $items = array();
+  $items['admin/config/development/dev-helper'] = array(
+    'title' => 'Dev Helper',
+    'description' => 'Dev Helper module settings',
+    'page callback' => 'dev_helper_settings',
+    'access arguments' => array(
+      'access administration menu',
+    ),
+  );
+  $items['admin/config/development/dev-helper/settings'] = array(
+    'title' => 'Settings',
+    'weight' => 1,
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+  $items['admin/config/development/dev-helper/paragraphs-report'] = array(
+    'title' => 'Paragraphs Report',
+    'description' => 'Paragraph usage info',
+    'page callback' => 'dev_helper_para',
+    'access arguments' => array(
+      'access administration menu',
+    ),
+    'weight' => 2,
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Return Dev Helper admin url path
+ *
+ * @return string
+ */
+function dev_helper_get_admin_config_path() {
+  return '/admin/config/development/dev-helper';
+}
+
+/**
+ * Settings page.
+ *
+ * @return array
+ */
+function dev_helper_settings() {
+  $content = 'Dev Helper Settings';
+  // @todo Any module settings will go here in a system_settings_form
+  $content .= '<hr><br>End.';
+  return ['#markup' => $content];
+}
+
+/**
+ * Helper method to get all paragraph bundles into assoc array
+ *
+ * Example: 'title_text_link' => string 'Title Text Link'
+ *
+ * @return array of machine name => name
+ */
+function _dev_helper_para_names() {
+  $paraBundles = array();
+  $_bundles = paragraphs_bundle_load();
+  foreach ($_bundles as $machine_name => $bundle) {
+    $paraBundles[$machine_name] = $bundle->name;
+  }
+  return $paraBundles;
+}
+
+/**
+ * Helper method to get list of content types and their paragraph fields
+ *
+ * Example:
+ *   'recall' =>
+ *      0 => 'field_content'
+ *      1 => 'field_section'
+ *
+ * @return array machine_name => name
+ */
+function _dev_helper_para_fields() {
+  $types = node_type_get_names();
+  $paraFields = [];
+  foreach ($types as $machine_name => $title) {
+    // Get all fields in content type
+    $fields_info = field_info_instances('node', $machine_name);
+    foreach ($fields_info as $field_name => $value) {
+      $field_info = field_info_field($field_name);
+      // Add paragraph fields to array
+      if ($field_info['type'] == 'paragraphs') {
+        $paraFields[$machine_name][] = $field_info['field_name'];
+      }
+    }
+  }
+  return $paraFields;
+}
+
+/**
+ * Report on paragraphs usage on site.
+ *
+ * @return array
+ */
+function dev_helper_para() {
+  $content = '<h2>Paragraphs Report</h2>';
+  $content .= '<a href="?runReport=yes" 
+        onclick="return confirm(\'Are you sure? This scans all nodes on the site and should only be run on local dev environments.\')">
+        Run Report and update data</a><hr><Br>';
+
+  // Check for Drupal var with cached data
+  // and serve that unless we are rerunning the report.
+  if (isset($_GET['runReport']) && $_GET['runReport'] == 'yes') {
+    // Change max time to infinite to avoid timeouts
+    ini_set('max_execution_time', 0);
+
+    // Set variables
+    $paraFields = _dev_helper_para_fields();
+    // content types w/paragraph fields
+    $typesWithParagraphs = array_keys($paraFields);
+    $reports = [];
+
+    // Query all nodes if not in test mode
+    $query = new EntityFieldQuery();
+    $query->entityCondition('entity_type', 'node')
+      ->entityCondition('bundle', $typesWithParagraphs, 'IN');
+    //->range(0, 350); // test with # nodes
+    $results = $query->execute();
+    $nids = array_keys($results['node']);
+
+    // Loop through all nodes
+    foreach ($nids as $nid) {
+      // Load one node at a time
+      $node = entity_load_single('node', $nid);
+      // Get instances of each paragraph field on current node in loop
+      // We already know which top level fields on this node type are paragraphs
+      foreach ($paraFields[$node->type] as $pfield) {
+        // Does this node have a value for this top level paragraph field?
+        if (!empty($node->$pfield)) {
+          // Shift lang off paragraph field array to get paragraph ids
+          $paraItems = array_shift($node->$pfield);
+          // Load paragraph items related to field $pfield (like field_content)
+          // Still on first level of paragraph components, field_content -> text component
+          foreach ($paraItems as $paraItem) {
+            $paragraph = paragraphs_item_revision_load($paraItem['revision_id']);
+            // Add top level component with nid to report array
+            $reports[$paragraph->bundle][] = $nid;
+            // Call recursive method to get all sub-components of field
+            $reports = _dev_helper_paragraph_parse($node, $paragraph, $reports);
+          }
+        }
+      }
+      unset($node); // cleanup var for next loop
+    }
+
+    // Cleanup Reports
+    $simpleReport = [];
+    $names = [];
+    // Pull out paragraph names into a separate array $names
+    // and sort the values back into new array $simpleReport.
+    foreach ($reports as $name => $value) {
+      $names[] = $name;
+      // $value is an array of nids related to the paragraph type in loop
+      // Redo array to [nid => # of times found in array]
+      //     37 => int 6
+      $simpleReport[$name] = array_count_values($value);
+    }
+
+    // Sort names alpha
+    sort($names);
+    // Redo report array order so multi is sorted by names as alpha
+    $data = [];
+    foreach ($names as $name) {
+      $data[$name] = $simpleReport[$name];
+    }
+
+    // Add to cache
+    variable_set('dev_helper_paragraphs_report', $data);
+    // Message to user
+    drupal_set_message('Dev Helper updated Paragraphs Report data.');
+    // Redirect back to admin page to clear $_GET var from url
+    drupal_goto(dev_helper_get_admin_config_path() . '/paragraphs-report' );
+  }
+  else {
+    $data = variable_get('dev_helper_paragraphs_report', []);
+  }
+
+  // Format output
+  //$content .= '<hr><pre>' . print_r($data, TRUE) . '</pre>';
+  // Select list drop down for filtering
+  $names = array_keys($data);
+  // get all paragraph bundles machine_name => name
+  $paraBundles = _dev_helper_para_names();
+  $filterForm = '<form method="get" action="/' . current_path() . '">';
+  $filterForm .= 'Filter by Type: <select name="ptype" onchange="this.form.submit()">';
+  $filterForm .= '<option value="">All</option>';
+  foreach ($names as $name) {
+    $selected = isset($_GET['ptype']) && $_GET['ptype'] == $name ? ' selected' : '';
+    $filterForm .= '<option name="' . $name . '" value="' . $name . '"' . $selected . '>' . $paraBundles[$name] . '</option>';
+  }
+  $filterForm .= '</select></form><br>';
+  $content .= $filterForm;
+
+  // Table
+  // https://www.drupal.org/node/156863
+  $header = ['Paragraph Type', 'Node ID', 'Count'];
+  $rows = [];
+  $filter = isset($_GET['ptype']) ? trim($_GET['ptype']) : '';
+  // Loop through each paragraph type array
+  foreach ($data as $name => $nodes) {
+    // If filtering by a paragraph type, only show that
+    if ( (!empty($filter) && $filter == $name) || empty($filter)) {
+      // Loop through second level array of counts/nids
+      foreach ($nodes as $nid => $count) {
+        // Show types as formal name and machine name in parenthesis
+        $typeName = $paraBundles[$name] . ' (' . $name . ')';
+        $rows[] = [$typeName, $nid, $count];
+      }
+    }
+  }
+  // Table without pager
+  //$content .= theme('table', ['header' => $header, 'rows' => $rows]);
+  // Table with pager
+  // Pager data
+  // https://www.drupal.org/forum/support/module-development-and-code-questions/2013-04-10/to-add-pager-in-theme-table-in-drupal#comment-8792051
+  $per_page = 12;
+  // Initialize the pager
+  $current_page = pager_default_initialize(count($rows), $per_page);
+  // Split your list into page sized chunks
+  $chunks = array_chunk($rows, $per_page, TRUE);
+  // Show the appropriate items from the list
+  $content .= theme('table', ['header' => $header, 'rows' => $chunks[$current_page]]);
+  // Show the pager
+  $content .= theme('pager', array('quantity',count($rows)));
+
+  return ['#markup' => $content];
+}
+
+/**
+ * Helper recursive method to find embedded paragraphs
+ *
+ * @return array of paragraph values
+ */
+function _dev_helper_paragraph_parse($node, $paragraph, $reports) {
+  // Get fields on paragraph, just return field names
+  $fields = array_keys(field_info_instances('paragraphs_item', $paragraph->bundle));
+  // Loop through fields and check if it's a paragraph field
+  foreach($fields as $field) {
+    // Skip lang array key
+    $items = array_shift($paragraph->$field);
+    foreach ($items as $item) {
+      // If revision_id exists, this is a paragraph field
+      if (isset($item['revision_id'])) {
+        $p = paragraphs_item_revision_load($item['revision_id']);
+        // Add info to report array
+        $reports[$p->bundle][] = $node->nid;
+        // Call method again to check for embedded paragraphs on this field?
+        $reports = _dev_helper_paragraph_parse($node, $p, $reports);
+      }
+    }
+  }
+  return $reports;
+}
