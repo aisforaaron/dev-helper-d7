@@ -48,18 +48,41 @@ if [ "$backupDb" == 'y' ]; then
   drush sql-dump --gzip --result-file=$scriptDir/backups/$siteName-$dbNote-$nowTime.sql
 fi
 
-echo 'Import db gzip over current database? OVERWRITES CURRENT DATA. (y/n): ';
-read importDb
-if [ "$importDb" == 'y' ]; then
-	if [ ! -f $scriptDir/sites/$siteName.sql.gz ]; then
-		echo 'Database file does not exist. Please add file to resetdb/sites/*your-site*.sql.gz and run this again.';
+# Import a previous backup? (or use the default one in 'else' step)
+echo 'Switch to previous backup db over current database? OVERWRITES CURRENT DATA. (y/n): ';
+read switchDb
+if [ "$switchDb" == 'y' ]; then
+  # Show list of backup dbs to user
+  ls $scriptDir/backups
+  echo ' ';
+  echo 'Copy/paste the db.gz from file list above that you want to import.';
+  read dbToImport
+  # Check that the file is there and drop/import
+	if [ ! -f $scriptDir/backups/$dbToImport ]; then
+		echo 'Database file in backups dir does not exist. Maybe you copy/pasted wrong?';
 		exit;
 	fi
+	echo 'Clearing out current db and importing selected backup.';
 	# Clear out current db tables, suppress output
 	drush sql-drop --yes &> /dev/null
 	# Import sql.gz
-	gunzip < $scriptDir/sites/$siteName.sql.gz | drush sqlc
+	gunzip < $scriptDir/backups/$dbToImport | drush sqlc
 	echo 'DB was imported';
+else
+  # Import the
+  echo 'Import db gzip over current database? OVERWRITES CURRENT DATA. (y/n): ';
+  read importDb
+  if [ "$importDb" == 'y' ]; then
+    if [ ! -f $scriptDir/sites/$siteName.sql.gz ]; then
+      echo 'Database file does not exist. Please add file to resetdb/sites/*your-site*.sql.gz and run this again.';
+      exit;
+    fi
+    # Clear out current db tables, suppress output
+    drush sql-drop --yes &> /dev/null
+    # Import sql.gz
+    gunzip < $scriptDir/sites/$siteName.sql.gz | drush sqlc
+    echo 'DB was imported';
+  fi
 fi
 
 # Run custom site cmds if exist

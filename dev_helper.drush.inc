@@ -23,12 +23,6 @@ function dev_helper_drush_command() {
   $items['reset-db'] = array(
     'callback'    => 'dev_helper_drush_reset_db',
     'description' => t('Load in a new sql.gz file and prompt user for common local dev commands.'),
-//    'arguments'   => [
-//      'skip' => 'Skip all prompts and just load db gzip.'
-//    ],
-//    'options' => [
-//      'verbose'    => 'Drush setting to show watchdog/error messages in command line',
-//    ],
     'examples' => [
       'drush reset-db' => 'Run drush command and related bash scripts.'
     ]
@@ -72,6 +66,7 @@ function dev_helper_drush_search_string ($str = '') {
       preg_match('/(' . $str . ')/', $content, $matches, PREG_OFFSET_CAPTURE);
       if (!empty($matches)) {
         $nids[] = $result->nid;
+        drush_print('Found string in node id: ' . $result->nid . ' type: ' . $result->type);
       }
       $counter = $index;
     }
@@ -92,7 +87,7 @@ function dev_helper_drush_search_string ($str = '') {
  *
  * @param $str
  */
-function dev_helper_drush_reset_db($skip = FALSE) {
+function dev_helper_drush_reset_db() {
   // Prompt user to run script or not
   $msg = '- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -' . "\n";
   $msg.= '   R E S E T - D B - S C R I P T ' . "\n";

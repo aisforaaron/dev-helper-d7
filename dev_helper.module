@@ -50,8 +50,16 @@ function dev_helper_get_admin_config_path() {
  * @return array
  */
 function dev_helper_settings() {
-  $content = 'Dev Helper Settings';
+  $content = 'Dev Helper Settings<br><br>';
   // @todo Any module settings will go here in a system_settings_form
+
+  
+
+  // You can use this area to test out code snippets.
+  // ...
+
+
+
   $content .= '<hr><br>End.';
   return ['#markup' => $content];
 }
